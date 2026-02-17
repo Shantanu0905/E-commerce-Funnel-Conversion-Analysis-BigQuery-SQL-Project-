@@ -1,0 +1,114 @@
+-- Funnel Stage Analysis (Last 30 Days)
+
+WITH funnel_stages AS (
+  SELECT
+    COUNT(DISTINCT CASE WHEN event_type = 'page_view' THEN user_id END) AS stage_1_views,
+    COUNT(DISTINCT CASE WHEN event_type = 'add_to_cart' THEN user_id END) AS stage_2_cart,
+    COUNT(DISTINCT CASE WHEN event_type = 'checkout_start' THEN user_id END) AS stage_3_checkout,
+    COUNT(DISTINCT CASE WHEN event_type = 'payment_info' THEN user_id END) AS stage_4_payment,
+    COUNT(DISTINCT CASE WHEN event_type = 'purchase' THEN user_id END) AS stage_5_purchase
+  FROM `innate-shell-451806-d7.Sql_Practise.New`
+  WHERE TIMESTAMP(event_date) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+)
+
+SELECT
+  stage_1_views,
+  stage_2_cart,
+  ROUND(SAFE_DIVIDE(stage_2_cart, stage_1_views) * 100, 2) AS view_to_cart_rate,
+
+  stage_3_checkout,
+  ROUND(SAFE_DIVIDE(stage_3_checkout, stage_2_cart) * 100, 2) AS cart_to_checkout_rate,
+
+  stage_4_payment,
+  ROUND(SAFE_DIVIDE(stage_4_payment, stage_3_checkout) * 100, 2) AS checkout_to_payment_rate,
+
+  stage_5_purchase,
+  ROUND(SAFE_DIVIDE(stage_5_purchase, stage_4_payment) * 100, 2) AS payment_to_purchase_rate,
+
+  ROUND(SAFE_DIVIDE(stage_5_purchase, stage_1_views) * 100, 2) AS overall_conversion_rate
+
+FROM funnel_stages;
+-- Funnel by Traffic Source
+
+WITH source_funnel AS (
+  SELECT
+    traffic_source,
+    COUNT(DISTINCT CASE WHEN event_type = 'page_view' THEN user_id END) AS visitors,
+    COUNT(DISTINCT CASE WHEN event_type = 'add_to_cart' THEN user_id END) AS cart_users,
+    COUNT(DISTINCT CASE WHEN event_type = 'purchase' THEN user_id END) AS buyers
+  FROM `innate-shell-451806-d7.Sql_Practise.New`
+  WHERE TIMESTAMP(event_date) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+  GROUP BY traffic_source
+)
+
+SELECT
+  traffic_source,
+  visitors,
+  cart_users,
+  buyers,
+
+  ROUND(SAFE_DIVIDE(cart_users, visitors) * 100, 2) AS view_to_cart_rate,
+  ROUND(SAFE_DIVIDE(buyers, visitors) * 100, 2) AS visitor_to_purchase_rate,
+  ROUND(SAFE_DIVIDE(buyers, cart_users) * 100, 2) AS cart_to_purchase_rate
+
+FROM source_funnel
+ORDER BY buyers DESC;
+-- Time to Conversion Analysis
+
+WITH user_journey AS (
+  SELECT
+    user_id,
+    MIN(CASE WHEN event_type = 'page_view' THEN TIMESTAMP(event_date) END) AS view_time,
+    MIN(CASE WHEN event_type = 'add_to_cart' THEN TIMESTAMP(event_date) END) AS cart_time,
+    MIN(CASE WHEN event_type = 'purchase' THEN TIMESTAMP(event_date) END) AS purchase_time
+  FROM `innate-shell-451806-d7.Sql_Practise.New`
+  WHERE TIMESTAMP(event_date) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+  GROUP BY user_id
+)
+
+SELECT
+  COUNT(*) AS converted_users,
+
+  ROUND(AVG(TIMESTAMP_DIFF(cart_time, view_time, MINUTE)), 2) AS avg_view_to_cart_minutes,
+
+  ROUND(AVG(TIMESTAMP_DIFF(purchase_time, cart_time, MINUTE)), 2) AS avg_cart_to_purchase_minutes,
+
+  ROUND(AVG(TIMESTAMP_DIFF(purchase_time, view_time, MINUTE)), 2) AS avg_total_journey_minutes
+
+FROM user_journey
+WHERE view_time IS NOT NULL
+  AND cart_time IS NOT NULL
+  AND purchase_time IS NOT NULL
+  AND view_time <= cart_time
+  AND cart_time <= purchase_time;
+
+-- Revenue Performance Analysis
+
+WITH revenue_metrics AS (
+  SELECT
+    COUNT(DISTINCT CASE WHEN event_type = 'page_view' THEN user_id END) AS total_visitors,
+
+    COUNT(DISTINCT CASE WHEN event_type = 'purchase' THEN user_id END) AS total_buyers,
+
+    COUNT(CASE WHEN event_type = 'purchase' THEN 1 END) AS total_orders,
+
+    SUM(CASE WHEN event_type = 'purchase' THEN amount END) AS total_revenue
+
+  FROM `innate-shell-451806-d7.Sql_Practise.New`
+  WHERE TIMESTAMP(event_date) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+)
+
+SELECT
+  total_visitors,
+  total_buyers,
+  total_orders,
+  total_revenue,
+
+  ROUND(SAFE_DIVIDE(total_revenue, total_orders), 2) AS avg_order_value,
+
+  ROUND(SAFE_DIVIDE(total_revenue, total_buyers), 2) AS revenue_per_buyer,
+
+  ROUND(SAFE_DIVIDE(total_revenue, total_visitors), 2) AS revenue_per_visitor
+
+FROM revenue_metrics;
+
